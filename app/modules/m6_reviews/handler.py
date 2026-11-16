@@ -1,4 +1,4 @@
-"""M6 路由：复核队列、决定提交、时间窗历史、批次清单。"""
+"""M6 路由：复核队列、影响预览、决定提交、时间窗历史、批次清单。"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Query
@@ -14,6 +14,7 @@ class DecisionRequest(BaseModel):
     decision: str = Field(min_length=1, max_length=10)
     expected_version: int = Field(ge=0)
     operator: str = Field(default="采购主数据组", max_length=40)
+    expected_impact: str = Field(default="", max_length=64)
 
 
 @router.get("/reviews")
@@ -36,11 +37,18 @@ def review_history(since: str = Query(default=""), until: str = Query(default=""
     return service.decide_windows(run["run_id"], since, until)
 
 
+@router.get("/reviews/{pair_id}/impact")
+def review_impact(pair_id: str):
+    """确认前的影响预览：该对 merge / keep 各自带入的成员、税号、金额与既有证据。"""
+    run = intake_service.ensure_run()
+    return service.impact_preview(run["run_id"], pair_id)
+
+
 @router.post("/reviews/{pair_id}/decision")
 def submit_decision(pair_id: str, body: DecisionRequest):
     run = intake_service.ensure_run()
     record = service.decide(run["run_id"], pair_id, body.decision, body.expected_version,
-                            body.operator)
+                            body.operator, body.expected_impact)
     return {"run_id": run["run_id"], "decision": record,
             "queue": service.queue_stats(run["run_id"])}
 

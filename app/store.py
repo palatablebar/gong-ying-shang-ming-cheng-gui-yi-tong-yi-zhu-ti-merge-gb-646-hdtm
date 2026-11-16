@@ -111,6 +111,8 @@ SCHEMA = (
         version INTEGER NOT NULL,
         operator TEXT NOT NULL,
         decided_at TEXT NOT NULL,
+        basis_json TEXT NOT NULL DEFAULT '',
+        impact_json TEXT NOT NULL DEFAULT '',
         PRIMARY KEY (run_id, pair_id)
     )""",
     "CREATE INDEX IF NOT EXISTS idx_records_run ON records(run_id)",
@@ -141,7 +143,17 @@ def init_db(path=None) -> None:
     with connect(path) as conn:
         for statement in SCHEMA:
             conn.execute(statement)
+        _migrate(conn)
         conn.commit()
+
+
+def _migrate(conn) -> None:
+    """旧库补列：decisions 增加依据快照与影响快照。缺列的旧行按失效处理。"""
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(decisions)")}
+    if "basis_json" not in columns:
+        conn.execute("ALTER TABLE decisions ADD COLUMN basis_json TEXT NOT NULL DEFAULT ''")
+    if "impact_json" not in columns:
+        conn.execute("ALTER TABLE decisions ADD COLUMN impact_json TEXT NOT NULL DEFAULT ''")
 
 
 def reset_db(path=None) -> None:
@@ -399,10 +411,12 @@ def save_decision(decision: dict) -> None:
     with connect() as conn:
         conn.execute(
             "INSERT OR REPLACE INTO decisions (run_id, pair_id, decision, expected_version,"
-            " version, operator, decided_at) VALUES (?,?,?,?,?,?,?)",
+            " version, operator, decided_at, basis_json, impact_json)"
+            " VALUES (?,?,?,?,?,?,?,?,?)",
             (decision["run_id"], decision["pair_id"], decision["decision"],
              decision["expected_version"], decision["version"], decision["operator"],
-             decision["decided_at"]),
+             decision["decided_at"], decision.get("basis_json", ""),
+             decision.get("impact_json", "")),
         )
         conn.commit()
 

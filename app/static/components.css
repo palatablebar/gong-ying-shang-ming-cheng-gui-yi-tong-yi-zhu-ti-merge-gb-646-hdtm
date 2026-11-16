@@ -186,3 +186,18 @@
   color: var(--ink-muted);
   padding: 10px 0;
 }
+
+/* 影响预览：确认前看清桥接会带入的成员、税号、金额与证据 */
+.impact-cell { background: var(--panel-soft, #f7f8fa); }
+.impact-grid { display: flex; flex-wrap: wrap; gap: 10px; margin: 6px 0; }
+.impact-box {
+  flex: 1 1 240px;
+  border: 1px solid var(--line, #dfe3e8);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.impact-box h3 { font-size: 12.5px; margin: 0 0 4px; }
+.impact-box ul { margin: 4px 0 0; padding-left: 16px; }
+.impact-box li { margin: 2px 0; }
+.impact-actions { margin-top: 8px; display: flex; gap: 8px; }

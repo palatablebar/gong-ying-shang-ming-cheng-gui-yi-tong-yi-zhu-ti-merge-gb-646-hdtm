@@ -177,6 +177,7 @@ def page_pairs(request: Request):
     run_id = run["run_id"]
     pair_service.ensure_pairs(run_id)
     pairs = store.list_pairs(run_id)
+    built = cluster_service.build_plan(run_id)
     context = base_context(request, "pairs", "候选对", run)
     context.update({
         "pairs": pairs[:60],
@@ -184,6 +185,8 @@ def page_pairs(request: Request):
         "blocks": store.list_blocks(run_id)[:10],
         "block_summary": block_service.summary(run_id),
         "decisions": {d["pair_id"]: d for d in store.list_decisions(run_id)},
+        "edges": built["edges"],
+        "blocked": {item["pair_id"]: item for item in built["blocked"]},
     })
     return render(request, "pairs.html", context)
 
@@ -192,7 +195,7 @@ def page_pairs(request: Request):
 def page_clusters(request: Request):
     run = current_run()
     run_id = run["run_id"]
-    cluster_service.ensure_clusters(run_id)
+    summary = cluster_service.ensure_clusters(run_id)
     members = store.list_cluster_members(run_id)
     by_cluster = {}
     for member in members:
@@ -202,6 +205,7 @@ def page_clusters(request: Request):
         "clusters": store.list_clusters(run_id)[:40],
         "members": by_cluster,
         "ledger": cluster_service.reconcile(run_id),
+        "summary": summary,
     })
     return render(request, "clusters.html", context)
 
@@ -211,11 +215,21 @@ def page_reviews(request: Request):
     run = current_run()
     run_id = run["run_id"]
     queue = review_service.queue_items(run_id)
+    built = cluster_service.build_plan(run_id)
+    edges = built["edges"]
+    decisions = []
+    for row in store.list_decisions(run_id)[:40]:
+        edge = edges.get(row["pair_id"], {})
+        decisions.append({
+            **row,
+            "stale": bool(edge.get("stale")) or row["pair_id"] not in edges,
+            "impact": json.loads(row["impact_json"]) if row.get("impact_json") else None,
+        })
     context = base_context(request, "reviews", "复核队列", run)
     context.update({
         "queue": queue[:40],
         "stats": review_service.queue_stats(run_id),
-        "decisions": store.list_decisions(run_id)[:40],
+        "decisions": decisions,
         "references": review_service.reference_issues(run_id),
         "runs": run_briefs(8),
     })

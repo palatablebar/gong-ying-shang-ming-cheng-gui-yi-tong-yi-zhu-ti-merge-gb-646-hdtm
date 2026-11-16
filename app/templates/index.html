@@ -14,6 +14,7 @@
         <tr><td>隔离行</td><td class="num">{{ ledger.quarantined|intcomma }}</td><td>见下方诊断</td></tr>
         <tr><td>同号冲突</td><td class="num">{{ ledger.conflicts|intcomma }}</td><td>保留先到</td></tr>
         <tr><td>合并成员</td><td class="num">{{ ledger.merged_members|intcomma }}</td><td>并入代表</td></tr>
+        <tr><td>桥接拦截</td><td class="num">{{ summary.blocked_bridges|intcomma }}</td><td>待人工确认的桥接边</td></tr>
         <tr><td>金额合计</td><td class="num">{{ ledger.amount_clusters|money }}</td><td>元</td></tr>
       </tbody>
     </table>
@@ -69,7 +70,7 @@
 <section class="panel">
   <div class="panel-head">
     <h2 class="panel-title">合并簇</h2>
-    <div class="panel-num">{{ summary.clusters }} 个 · 冲突 {{ summary.conflict_clusters }}</div>
+    <div class="panel-num">{{ summary.clusters }} 个 · 冲突 {{ summary.conflict_clusters }} · 桥接拦截 {{ summary.blocked_bridges }}</div>
   </div>
   <table class="tbl tbl-tight">
     <thead><tr><th>主体</th><th>代表</th><th>税号</th><th>城市</th><th class="num">成员</th><th class="num">累计(元)</th><th>状态</th></tr></thead>

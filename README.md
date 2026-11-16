@@ -12,9 +12,10 @@
 - 候选对：归一名的字符 2-gram 倒排桶，超大桶跳过并计数，候选对确定性编号。
 - 相似判定：0.55 × bigram Dice + 0.45 × 编辑比率；税号硬冲突拒绝、税号相同强制合并、
   城市不同降级复核、得分分档 0.92 / 0.80。
-- 合并簇：并查集合并，代表元取税号最小者，簇内税号冲突标记交复核，
+- 合并簇：约束合并计划，桥接边按税号相容性准入；代表元取税号最小者；
   簇金额与成员分摊用 Decimal 逐分守恒。
-- 复核：队列按得分降序，决定带版本乐观锁，写入后簇立即重算；引用异常四类可查。
+- 复核：桥接影响预览（成员、税号、金额、既有证据），决定带依据快照与版本乐观锁，
+  上游更新使依据失效即重算；已拒绝或待核的关系不会从另一条路径回到主数据。
 - 导出：主数据、成员分摊、隔离区、冲突、运行清单（含 `run_id` 与输入 sha256）。
 
 ## 模块清单
@@ -25,8 +26,8 @@
 | M2 名称归一 | `GET /api/normalize` | N01 到 N07 七条规则，行业词不剥离 |
 | M3 分块候选 | `POST /api/blocks` | bigram 倒排桶，桶上限 120，候选上限 4000 |
 | M4 相似判定 | `POST /api/pairs` | 加权得分与四级优先判定 |
-| M5 等价类合并 | `POST /api/clusters` | 并查集、代表元、最大余额分摊 |
-| M6 复核批次 | `POST /api/reviews/{pair_id}/decision` | 队列、版本锁、引用一致性 |
+| M5 等价类合并 | `POST /api/clusters` | 约束合并计划、桥接准入、代表元、最大余额分摊 |
+| M6 复核批次 | `POST /api/reviews/{pair_id}/decision` | 队列、影响预览、依据快照、版本锁、引用一致性 |
 | M7 主数据导出 | `GET /api/export/master.csv` | CSV 与运行清单，UTF-8 BOM |
 
 ## 页面
@@ -40,8 +41,12 @@
 1. 归一名 = 全角转半角 → 括号统一 → 去空白 → 去法律后缀 → 去地名标记 → 拉丁小写 → 去标点。
 2. 得分 = 0.55 × bigram Dice + 0.45 × 编辑比率，量化到 6 位小数。
 3. 判定优先级：税号冲突（拒绝） > 税号相同（自动） > 城市不同（复核） > 得分分档。
-4. 代表元 = 簇内税号最小者；无税号取供应商号最小者。
-5. 簇金额 = Σ成员金额（Decimal）；成员分摊按比例取整到分后最大余额补齐。
+4. 桥接准入：自动边仅在并入后簇内非空税号不超过一个时进入主数据；
+   会产生多税号簇的桥接边自动拦截（`C_BRIDGE_TAX`），经人工看清影响后显式放行；
+   人工 keep 与待核 review 构成 cannot-link 约束（`C_BRIDGE_HOLD`），任何路径都绕不过。
+5. 代表元 = 簇内税号最小者；无税号取供应商号最小者。
+6. 簇金额 = Σ成员金额（Decimal）；成员分摊按比例取整到分后最大余额补齐。
+7. 复核决定带依据快照：上游重算使依据不符时决定失效，不参与合并，需重新确认。
 
 字段类型、单位、空值与哨兵、时间与区间定义见 `docs/DATA-DICTIONARY.md`；
 陷阱清单与对账规则见 `docs/DEPTH.md`；运维动作见 `docs/RUNBOOK.md`。
@@ -59,12 +64,14 @@ docker compose exec -T app python -m pytest -q
 
 ## 演示步骤
 
-1. 打开 `/`：看到批次号、采信行数、主体数与对账结论。
+1. 打开 `/`：看到批次号、采信行数、主体数、桥接拦截数与对账结论。
 2. `/` 下方：逐文件诊断与隔离区两行带原因码与原始行号。
 3. `/normalize`：原名到归一名的对照，试算框可现场验证一条名称。
-4. `/pairs`：按结论过滤候选对，看得分与依据字段。
-5. `/clusters`：合并簇与成员分摊，`C-0009` 标税号冲突。
-6. `/reviews`：三项带复核，判定后簇数立即变化；引用异常五条。
+4. `/pairs`：按结论过滤候选对，看得分、依据字段与每对的合并状态。
+5. `/clusters`：合并簇与成员分摊；`C-0009` 自动层只含税号相容的 3 名成员。
+6. `/reviews`：三项带复核加一条被拦截的桥接边 `P-00102`；点"影响"看清它会带入
+   4 名成员、两个税号、合计 79200.00 元与既有证据边，再按此影响确认合并，
+   `C-0009` 变为 4 成员并标税号冲突；引用异常五条。
 7. `/export`：下载主数据、成员分摊、隔离区、冲突与运行清单。
 
 ## 测试
@@ -73,16 +80,17 @@ docker compose exec -T app python -m pytest -q
 docker compose exec -T app python -m pytest -q
 ```
 
-81 条测试：每个模块 8 到 13 条，另有端到端 4 条与不变量 5 条。
+98 条测试：每个模块 8 到 13 条，另有桥接准入 17 条、端到端 4 条与不变量 5 条。
 
 ## 目录
 
 ```text
 app/main.py config.py errors.py reasons.py manifest.py store.py web.py
 app/modules/m1_intake … m7_export/{handler.py service.py 规则与读写出}
+app/modules/m5_clusters/plan.py 约束合并计划（桥接准入、约束传播、失效与预览）
 app/templates/{base.html + 6 页}
 app/static/{theme.css layout.css components.css app.js table.js charts.js}
 docs/{DEPTH.md DATA-DICTIONARY.md RUNBOOK.md}
 sample_data/ 六个脏样例
-tests/{conftest.py test_intake … test_export.py test_e2e.py test_invariants.py fixtures/}
+tests/{conftest.py test_intake … test_export.py test_bridge.py test_e2e.py test_invariants.py fixtures/}
 ```

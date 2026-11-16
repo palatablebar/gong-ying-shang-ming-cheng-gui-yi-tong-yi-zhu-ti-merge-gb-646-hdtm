@@ -41,7 +41,7 @@
     <div class="panel-num">前 {{ pairs|length }} 对</div>
   </div>
   <table class="tbl tbl-dense" data-filter-table>
-    <thead><tr><th>候选对</th><th>左侧</th><th>右侧</th><th class="num">bigram</th><th class="num">比率</th><th class="num">得分</th><th>结论</th><th>原因码</th><th>依据</th></tr></thead>
+    <thead><tr><th>候选对</th><th>左侧</th><th>右侧</th><th class="num">bigram</th><th class="num">比率</th><th class="num">得分</th><th>结论</th><th>原因码</th><th>合并状态</th><th>依据</th></tr></thead>
     <tbody>
       {% for pair in pairs %}
       <tr data-verdict="{{ pair.verdict }}">
@@ -53,6 +53,13 @@
         <td class="num strong">{{ pair.score|score }}</td>
         <td><span class="tag tag-{{ pair.verdict }}">{{ verdicts.get(pair.verdict) }}</span></td>
         <td>{{ reasons.get(pair.reason_code) }}</td>
+        <td>
+          {% set edge = edges.get(pair.pair_id, {}) %}
+          {% if pair.pair_id in blocked %}<span class="tag tag-bad">{{ reasons.get(blocked[pair.pair_id].code) }}</span>
+          {% elif edge.status == 'applied' %}<span class="tag tag-ok">已并入</span>
+          {% elif edge.status == 'pending' %}<span class="tag tag-review">待复核</span>
+          {% else %}<span class="tag">不合并</span>{% endif %}
+        </td>
         <td class="mono clip" title="{{ pair.detail }}">{{ pair.detail }}</td>
       </tr>
       {% endfor %}

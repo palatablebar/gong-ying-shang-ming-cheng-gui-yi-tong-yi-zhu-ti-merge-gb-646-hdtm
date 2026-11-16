@@ -10,11 +10,17 @@ from tests.fixtures import expected as EXP
 
 def test_queue_items(run):
     items = service.queue_items(run["run_id"])
-    assert len(items) == EXP.PAIRS_REVIEW
-    assert {item["reason_code"] for item in items} == {"P_CITY_MISMATCH", "P_REVIEW"}
+    assert len(items) == EXP.QUEUE_TOTAL
+    assert {item["reason_code"] for item in items} == {
+        "P_CITY_MISMATCH", "P_REVIEW", "P_AUTO"}
+    blocked = [item for item in items if item["bridge"]]
+    assert len(blocked) == EXP.QUEUE_BLOCKED
+    assert blocked[0]["pair_id"] == EXP.BRIDGE_PAIR_ID
+    assert blocked[0]["block_code"] == EXP.BRIDGE_BLOCK_CODE
     stats = service.queue_stats(run["run_id"])
-    assert stats["pending"] == EXP.PAIRS_REVIEW
+    assert stats["pending"] == EXP.QUEUE_TOTAL
     assert stats["decided"] == 0
+    assert stats["blocked_bridges"] == EXP.QUEUE_BLOCKED
     assert stats["references"] == 5
 
 
@@ -50,7 +56,7 @@ def test_decision_version_increments(run):
     assert record["operator"] == "王核"
     stats = service.queue_stats(run["run_id"])
     assert stats["decided"] == 1
-    assert stats["pending"] == EXP.PAIRS_REVIEW - 1
+    assert stats["pending"] == EXP.QUEUE_TOTAL - 1
 
 
 def test_stale_decision_rejected(run):
@@ -117,5 +123,6 @@ def test_reviews_page_api(client):
     response = client.get("/api/reviews")
     assert response.status_code == 200
     body = response.json()
-    assert body["total"] == EXP.PAIRS_REVIEW
+    assert body["total"] == EXP.QUEUE_TOTAL
+    assert body["stats"]["blocked_bridges"] == EXP.QUEUE_BLOCKED
     assert body["stats"]["references"] == 5

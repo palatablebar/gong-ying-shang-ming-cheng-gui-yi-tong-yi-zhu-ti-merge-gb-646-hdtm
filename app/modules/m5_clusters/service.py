@@ -1,4 +1,4 @@
-"""M5 等价类合并：并查集、代表元、簇金额与对账账本。"""
+"""M5 等价类合并：约束合并计划、代表元、簇金额与对账账本。"""
 from __future__ import annotations
 
 import json
@@ -6,39 +6,35 @@ from decimal import Decimal
 
 from ... import store
 from ...errors import NotFound
-from ...reasons import C_CLUSTER_CONFLICT, P_TAX_CONFLICT, V_UNKNOWN_RUN
+from ...reasons import C_CLUSTER_CONFLICT, V_UNKNOWN_RUN
 from ..m4_pairs import service as pair_service
-from . import allocate, represent, unionfind
+from . import allocate, plan, represent
 
 
 def _sum(records) -> Decimal:
     return sum((Decimal(record["ytd_amount"]) for record in records), Decimal("0"))
 
 
-def ensure_clusters(run_id: str) -> dict:
-    """总是重算：复核决定写入后，簇与金额立即一致。"""
+def build_plan(run_id: str) -> dict:
+    """当前批次的约束合并计划：簇划分、边状态与被拦截的桥接。"""
     pair_service.ensure_pairs(run_id)
     records = {record["supplier_id"]: record for record in store.list_records(run_id)}
     if not records:
         raise NotFound(V_UNKNOWN_RUN, run_id)
     decisions = {item["pair_id"]: item for item in store.list_decisions(run_id)}
-    dsu = unionfind.DisjointSet()
-    for supplier_id in records:
-        dsu.add(supplier_id)
+    result = plan.compute(records, store.list_pairs(run_id), decisions)
+    result["records"] = records
+    result["decisions"] = decisions
+    return result
 
-    for pair in store.list_pairs(run_id):
-        decision = decisions.get(pair["pair_id"])
-        if decision:
-            if decision["decision"] == "keep":
-                continue
-            if decision["decision"] == "merge" and pair["reason_code"] != P_TAX_CONFLICT:
-                dsu.union(pair["left_id"], pair["right_id"])
-            continue
-        if pair["verdict"] == "auto":
-            dsu.union(pair["left_id"], pair["right_id"])
+
+def ensure_clusters(run_id: str) -> dict:
+    """总是重算：复核决定写入后，簇与金额立即一致。"""
+    built = build_plan(run_id)
+    records = built["records"]
 
     entries = []
-    for members_ids in dsu.groups():
+    for members_ids in built["groups"]:
         members = [records[supplier_id] for supplier_id in members_ids]
         rep = represent.choose_representative(members)
         taxes = represent.distinct_taxes(members)
@@ -73,7 +69,9 @@ def ensure_clusters(run_id: str) -> dict:
                                 "supplier_id": supplier_id,
                                 "share_amount": share})
     store.save_clusters(run_id, clusters, member_rows)
-    return summary(run_id)
+    payload = summary(run_id)
+    payload["blocked_bridges"] = len(built["blocked"])
+    return payload
 
 
 def summary(run_id: str) -> dict:

@@ -11,15 +11,22 @@ from ...reasons import (
 )
 
 
-def build(pairs, records, decisions) -> list:
+def build(pairs, records, decisions, plan_result=None) -> list:
+    """复核队列 = review 档候选对 + 被准入规则拦截的桥接边。"""
     by_id = records
+    edges = (plan_result or {}).get("edges", {})
+    blocked = {item["pair_id"]: item for item in (plan_result or {}).get("blocked", [])}
     items = []
     for pair in pairs:
-        if pair["verdict"] != "review":
+        edge = edges.get(pair["pair_id"], {})
+        block = blocked.get(pair["pair_id"])
+        if pair["verdict"] != "review" and block is None:
             continue
         left = by_id.get(pair["left_id"], {})
         right = by_id.get(pair["right_id"], {})
         decision = decisions.get(pair["pair_id"])
+        stale = bool(edge.get("stale"))
+        effective = decision if (decision and not stale) else None
         items.append({
             "pair_id": pair["pair_id"],
             "left_id": pair["left_id"],
@@ -38,7 +45,12 @@ def build(pairs, records, decisions) -> list:
             "reason_code": pair["reason_code"],
             "detail": pair["detail"],
             "version": decision["version"] if decision else 0,
-            "decision": decision["decision"] if decision else "",
+            "decision": effective["decision"] if effective else "",
+            "stale": stale,
+            "bridge": block["status"] if block else "",
+            "block_code": block["code"] if block else "",
+            "left_span": len(block["left_members"]) if block else 1,
+            "right_span": len(block["right_members"]) if block else 1,
             "suggested": "merge" if Decimal(pair["score"]) >= Decimal("0.86") else "keep",
         })
     return sorted(items, key=lambda item: (-Decimal(item["score"]), item["pair_id"]))

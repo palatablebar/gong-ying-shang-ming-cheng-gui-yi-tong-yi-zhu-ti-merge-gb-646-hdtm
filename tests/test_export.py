@@ -25,6 +25,10 @@ def test_master_csv_rows(run):
 
 
 def test_master_csv_conflict_row(run):
+    """人工放行桥接后，导出、簇与复核记录中的主体与金额必须一致。"""
+    from app.modules.m6_reviews import service as review_service
+
+    review_service.decide(run["run_id"], EXP.BRIDGE_PAIR_ID, "merge", 0)
     cluster_service.ensure_clusters(run["run_id"])
     rows = _rows(service.master_csv(run["run_id"]))
     header = rows[0]
@@ -34,6 +38,14 @@ def test_master_csv_conflict_row(run):
     assert target["本年累计(元)"] == "79200.00"
     assert target["簇状态"] == "税号冲突"
     assert target["成员数"] == "4"
+
+    decision = store.get_decision(run["run_id"], EXP.BRIDGE_PAIR_ID)
+    impact = json.loads(decision["impact_json"])
+    assert impact["merged"] is True
+    assert impact["left"]["cluster_id"] == EXP.CONFLICT_CLUSTER_ID
+    assert impact["left"]["member_count"] == 4
+    assert impact["left"]["total_amount"] == target["本年累计(元)"]
+    assert impact["left"]["taxes"] == ["91320105MA1N2P3Q4", "91320105MA9Z8Y7X6"]
 
 
 def test_quarantine_csv(run):

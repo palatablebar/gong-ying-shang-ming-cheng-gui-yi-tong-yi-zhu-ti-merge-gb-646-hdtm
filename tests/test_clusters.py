@@ -1,4 +1,4 @@
-"""M5 等价类合并：代表元、传递冲突、顺序无关、最大余额分摊与对账。"""
+"""M5 等价类合并：代表元、桥接准入、顺序无关、最大余额分摊与对账。"""
 from __future__ import annotations
 
 from decimal import Decimal
@@ -18,19 +18,19 @@ def test_decimal_total_exact(run):
     """TRAP-10 浮点累加：簇合计必须逐分精确，等于成员 Decimal 之和。"""
     service.ensure_clusters(run["run_id"])
     cluster = {row["cluster_id"]: row for row in store.list_clusters(run["run_id"])}
-    target = cluster[EXP.CONFLICT_CLUSTER_ID]
-    assert Decimal(target["total_amount"]) == EXP.CONFLICT_CLUSTER_TOTAL
-    members = _members(run["run_id"], EXP.CONFLICT_CLUSTER_ID)
-    assert sum(members.values(), Decimal("0")) == EXP.CONFLICT_CLUSTER_TOTAL
-    assert members == dict(EXP.CONFLICT_CLUSTER_SHARES)
-    assert target["total_amount"] == "79200.00"
+    target = cluster[EXP.AUTO_CLUSTER_ID]
+    assert Decimal(target["total_amount"]) == EXP.AUTO_CLUSTER_TOTAL
+    members = _members(run["run_id"], EXP.AUTO_CLUSTER_ID)
+    assert sum(members.values(), Decimal("0")) == EXP.AUTO_CLUSTER_TOTAL
+    assert members == dict(EXP.AUTO_CLUSTER_SHARES)
+    assert target["total_amount"] == "75800.00"
 
 
 def test_representative_min_tax(run):
     service.ensure_clusters(run["run_id"])
     clusters = {row["cluster_id"]: row for row in store.list_clusters(run["run_id"])}
-    assert clusters[EXP.CONFLICT_CLUSTER_ID]["rep_id"] == EXP.CONFLICT_CLUSTER_REP
-    assert clusters[EXP.CONFLICT_CLUSTER_ID]["city"] == "南京"
+    assert clusters[EXP.AUTO_CLUSTER_ID]["rep_id"] == EXP.CONFLICT_CLUSTER_REP
+    assert clusters[EXP.AUTO_CLUSTER_ID]["city"] == "南京"
 
 
 def test_representative_without_tax():
@@ -42,15 +42,25 @@ def test_representative_without_tax():
     assert represent.choose_representative(members)["supplier_id"] == "S-2"
 
 
-def test_cluster_conflict_transitive(run):
-    """空税号记录把两个不同税号的主体连成一个簇，必须标冲突并交复核。"""
+def test_bridge_blocked_until_confirmed(run):
+    """桥接准入：空税号记录把两个不同税号的主体连起来时，自动层拦截，
+    人工显式确认后才并入同一付款对象并标冲突。"""
     summary = service.ensure_clusters(run["run_id"])
     assert summary["clusters"] == EXP.CLUSTERS
-    assert summary["conflict_clusters"] == EXP.CONFLICT_CLUSTERS
+    assert summary["conflict_clusters"] == 0
+    assert summary["blocked_bridges"] == EXP.QUEUE_BLOCKED
+
+    review_service.decide(run["run_id"], EXP.BRIDGE_PAIR_ID, "merge", 0)
+    summary = service.ensure_clusters(run["run_id"])
+    assert summary["clusters"] == EXP.CLUSTERS - 1
+    assert summary["conflict_clusters"] == 1
     cluster = {row["cluster_id"]: row for row in store.list_clusters(run["run_id"])}
     target = cluster[EXP.CONFLICT_CLUSTER_ID]
     assert target["conflict"] == 1
     assert target["member_count"] == 4
+    assert Decimal(target["total_amount"]) == EXP.CONFLICT_CLUSTER_TOTAL
+    members = _members(run["run_id"], EXP.CONFLICT_CLUSTER_ID)
+    assert members == dict(EXP.CONFLICT_CLUSTER_SHARES)
     taxes = represent.distinct_taxes([
         {"tax_id": "91320105MA1N2P3Q4"}, {"tax_id": ""},
         {"tax_id": "91320105MA9Z8Y7X6"}, {"tax_id": ""},
@@ -122,14 +132,23 @@ def test_reconcile_balances(run):
 
 
 def test_decision_merge_changes_clusters(run):
+    """三角待核：S-0013/S-0031 同簇，分别与 S-0078 待核。
+    单独确认一条会被另一条待核约束拦截；两条都确认后传递路径才成立。"""
     service.ensure_clusters(run["run_id"])
     before = len(store.list_clusters(run["run_id"]))
+
     review_service.decide(run["run_id"], EXP.PAIR_CITY_MISMATCH, "merge", 0)
+    assert len(store.list_clusters(run["run_id"])) == before
+    edge = service.build_plan(run["run_id"])["edges"][EXP.PAIR_CITY_MISMATCH]
+    assert edge["status"] == "blocked_hold"
+
+    review_service.decide(run["run_id"], "P-00074", "merge", 0)
     after = len(store.list_clusters(run["run_id"]))
     assert after == before - 1
     members = {row["supplier_id"]: row["cluster_id"]
                for row in store.list_cluster_members(run["run_id"])}
     assert members["S-0078"] == members["S-0013"]
+    assert members["S-0078"] == members["S-0031"]
 
 
 def test_clusters_api(client):
